@@ -1,0 +1,163 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Reelwright — private, in-browser video &amp; audio editor</title>
+<meta name="description" content="Trim video and audio, generate captions with a local Whisper model, and export — all in your browser. Nothing ever uploads." />
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600;700&family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="style.css" />
+</head>
+<body>
+
+<header class="topbar">
+  <div class="brand">
+    <svg class="brand-mark" width="22" height="22" viewBox="0 0 22 22" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+      <circle cx="7" cy="11" r="5.5" stroke="currentColor" stroke-width="1.6"/>
+      <circle cx="15" cy="11" r="5.5" stroke="currentColor" stroke-width="1.6"/>
+    </svg>
+    <span class="brand-name">Reelwright</span>
+  </div>
+  <div class="privacy-pill">
+    <span class="dot" aria-hidden="true"></span>
+    Runs entirely in your browser — nothing is uploaded
+  </div>
+</header>
+
+<main id="app">
+
+  <!-- Empty state / drop zone -->
+  <section id="dropzone" class="dropzone">
+    <div class="dropzone-inner">
+      <p class="eyebrow">01 — Load a clip</p>
+      <h1>Bring in a video or audio file</h1>
+      <p class="dropzone-sub">MP4, WebM, MOV, MP3, WAV, M4A — it stays on this device the whole time.</p>
+      <label class="file-button">
+        Choose a file
+        <input type="file" id="fileInput" accept="video/*,audio/*" hidden />
+      </label>
+      <p class="dropzone-hint">or drag one anywhere on this page</p>
+    </div>
+  </section>
+
+  <!-- Editor (hidden until a file is loaded) -->
+  <section id="editor" class="editor" hidden>
+
+    <div class="stage-row">
+
+      <div class="stage">
+        <div class="stage-frame">
+          <video id="preview" playsinline></video>
+          <div id="audioOnlyBadge" class="audio-only-badge" hidden>
+            <svg width="34" height="34" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+              <path d="M9 18V6l10-2v12" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+              <circle cx="6.5" cy="18.5" r="2.5" stroke="currentColor" stroke-width="1.5"/>
+              <circle cx="16.5" cy="16.5" r="2.5" stroke="currentColor" stroke-width="1.5"/>
+            </svg>
+            <span>Audio track</span>
+          </div>
+        </div>
+
+        <div class="transport">
+          <button id="playBtn" class="icon-btn" title="Play / pause" aria-label="Play or pause">
+            <svg id="playIcon" width="16" height="16" viewBox="0 0 16 16" fill="currentColor"><path d="M4 2.5v11l9-5.5-9-5.5z"/></svg>
+            <svg id="pauseIcon" width="16" height="16" viewBox="0 0 16 16" fill="currentColor" hidden><path d="M3.5 2.5h3v11h-3v-11zm6 0h3v11h-3v-11z"/></svg>
+          </button>
+          <button id="toInBtn" class="icon-btn small" title="Jump to in-point">IN</button>
+          <button id="toOutBtn" class="icon-btn small" title="Jump to out-point">OUT</button>
+          <label class="loop-toggle">
+            <input type="checkbox" id="loopToggle" />
+            Loop selection
+          </label>
+          <div class="time-readout" id="timeReadout">00:00:00.000 / 00:00:00.000</div>
+        </div>
+
+        <div class="timeline-wrap">
+          <canvas id="timeline" height="96"></canvas>
+          <div id="waveformStatus" class="waveform-status" hidden></div>
+        </div>
+
+      </div>
+
+      <aside class="tools">
+        <div class="tabs" role="tablist">
+          <button class="tab active" data-tab="trim" role="tab" aria-selected="true">Trim &amp; export</button>
+          <button class="tab" data-tab="captions" role="tab" aria-selected="false">Captions</button>
+        </div>
+
+        <div class="tab-panel" id="panel-trim">
+          <div class="field-row">
+            <label>In point<input type="text" id="inField" class="mono-input" value="00:00:00.000" /></label>
+            <button class="ghost-btn" id="setInBtn">Set to current</button>
+          </div>
+          <div class="field-row">
+            <label>Out point<input type="text" id="outField" class="mono-input" value="00:00:00.000" /></label>
+            <button class="ghost-btn" id="setOutBtn">Set to current</button>
+          </div>
+          <div class="field-row">
+            <label>Selection length<span id="selLength" class="mono-input readonly">00:00:00.000</span></label>
+          </div>
+
+          <hr class="divider" />
+
+          <label class="select-label">Export quality
+            <select id="qualitySelect">
+              <option value="ultrafast">Fastest (lower quality)</option>
+              <option value="fast" selected>Balanced</option>
+              <option value="medium">Best quality (slower)</option>
+            </select>
+          </label>
+
+          <label class="checkbox-row" id="embedCaptionsRow" hidden>
+            <input type="checkbox" id="embedCaptionsToggle" />
+            Embed captions as a subtitle track
+          </label>
+
+          <button id="exportBtn" class="primary-btn">Export trimmed clip</button>
+          <div id="exportStatus" class="status-block" hidden>
+            <div class="progress-track"><div id="exportProgressBar" class="progress-fill"></div></div>
+            <p id="exportStatusText" class="status-text">Loading FFmpeg…</p>
+          </div>
+          <a id="exportDownload" class="download-link" hidden download>Download exported file</a>
+        </div>
+
+        <div class="tab-panel" id="panel-captions" hidden>
+          <label class="select-label">Whisper model
+            <select id="modelSelect">
+              <option value="Xenova/whisper-tiny.en">Tiny · English only · fastest</option>
+              <option value="Xenova/whisper-tiny">Tiny · multilingual</option>
+              <option value="Xenova/whisper-base.en">Base · English only · more accurate</option>
+            </select>
+          </label>
+          <p class="hint-text">The model downloads once and runs on-device. Tiny models are ~40–75MB; Base is larger.</p>
+
+          <button id="transcribeBtn" class="primary-btn">Generate captions</button>
+          <div id="transcribeStatus" class="status-block" hidden>
+            <div class="progress-track"><div id="transcribeProgressBar" class="progress-fill"></div></div>
+            <p id="transcribeStatusText" class="status-text">Loading Whisper…</p>
+          </div>
+
+          <div id="transcriptPanel" class="transcript-panel" hidden>
+            <div class="transcript-actions">
+              <button class="ghost-btn small" id="downloadSrtBtn">Download .srt</button>
+              <button class="ghost-btn small" id="downloadVttBtn">Download .vtt</button>
+            </div>
+            <ol id="transcriptList" class="transcript-list"></ol>
+          </div>
+        </div>
+
+      </aside>
+    </div>
+  </section>
+
+</main>
+
+<footer class="footer">
+  <span>Reelwright — a static site. No server, no accounts, no uploads.</span>
+</footer>
+
+<script type="module" src="app.js"></script>
+</body>
+</html>
